@@ -98,6 +98,19 @@ def main(args):
 
     obs_trajs, act_trajs = load_expert_data_for_env(args.expert_data, action_dim)
 
+    # Print a quick summary of expert data structure
+    print("=== Expert data summary ===")
+    print(f"Number of trajectories: {len(obs_trajs)}")
+    if len(obs_trajs) > 0:
+        obs0 = np.asarray(obs_trajs[0])
+        act0 = np.asarray(act_trajs[0])
+        print(f"First trajectory obs shape: {obs0.shape}")
+        print(f"First trajectory act shape: {act0.shape}")
+        if obs0.shape[0] > 0 and act0.shape[0] > 0:
+            print(f"First obs[0]: {obs0[0]}")
+            print(f"First act[0]: {act0[0]}")
+    print("===========================")
+
     for traj_idx, (obs_traj, act_traj) in enumerate(zip(obs_trajs, act_trajs)):
         print(
             f"Playing trajectory {traj_idx + 1}/{len(obs_trajs)} "
