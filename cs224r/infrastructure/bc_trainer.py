@@ -206,7 +206,9 @@ class BCTrainer:
         # HINT4: You want each of these collected rollouts to be of length self.params['ep_len']
 
         print("\nCollecting data to be used for training...")
-        paths, envsteps_this_batch = TODO
+        # paths, envsteps_this_batch = TODO
+        paths, envsteps_this_batch = utils.sample_trajectories(self.env,collect_policy, itr, self.params['max_replay_buffer_size'], 
+                                                               self.log_video)
 
         # collect more rollouts with the same policy, to be saved as videos in tensorboard
         # note: here, we collect MAX_NVIDEO rollouts, each of length MAX_VIDEO_LEN
@@ -216,6 +218,9 @@ class BCTrainer:
             print('\nCollecting train rollouts to be used for saving videos...')
             train_video_paths = utils.sample_n_trajectories(self.env,
                 collect_policy, MAX_NVIDEO, MAX_VIDEO_LEN, True)
+            ##### 假装保存
+            for path in train_video_paths:
+                print('save to file :',path)
 
         return paths, envsteps_this_batch, train_video_paths
 
@@ -230,12 +235,13 @@ class BCTrainer:
             # TODO sample some data from the data buffer
             # HINT1: use the agent's sample function
             # HINT2: how much data = self.params['train_batch_size']
-            ob_batch, ac_batch, re_batch, next_ob_batch, terminal_batch = TODO
+            ob_batch, ac_batch, re_batch, next_ob_batch, terminal_batch = self.agent.sample(self.params['train_batch_size'])
 
             # TODO use the sampled data to train an agent
             # HINT: use the agent's train function
             # HINT: keep the agent's training log for debugging
-            train_log = TODO
+            # train_log = TODO
+            train_log = self.agent.train(ob_batch, ac_batch)
             all_logs.append(train_log)
         return all_logs
 
@@ -253,8 +259,10 @@ class BCTrainer:
         # HINT: query the policy (using the get_action function) with paths[i]["observation"]
         # and replace paths[i]["action"] with these expert labels
 
-        raise NotImplementedError
-
+        # raise NotImplementedError
+        for path in paths:
+            act = expert_policy.get_action(path['observation'])
+            path['action'] = act
     ####################################
     ####################################
 
