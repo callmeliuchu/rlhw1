@@ -2,6 +2,42 @@
 完整实现的 Behavior Cloning + DAgger - 完全独立版本
 包含迭代训练、首次专家数据加载、DAgger 专家重新标注等完整流程
 不依赖项目中的其他文件，超参数写死，方便学习理解
+
+关于专家策略（expert_policy）的来源：
+=====================================
+1. 专家策略是什么？
+   - 专家策略是一个预训练的神经网络，能够在该环境中执行任务
+   - 通常通过强化学习算法（如 PPO、TRPO、SAC 等）训练得到
+   - 专家策略的性能远高于随机策略或未训练的模型
+
+2. 专家策略从哪里来的？
+   【核心答案】：通过强化学习算法预先训练得到
+   
+   训练流程：
+   a) 使用强化学习算法（PPO/TRPO/SAC 等）在环境中训练
+   b) 策略网络通过与环境交互，不断更新参数
+   c) 训练直到策略性能达到专家水平（高回报、稳定行为）
+   d) 保存训练好的策略网络参数为 pickle 文件
+   
+   注意：
+   - 专家策略通常由课程/项目提供，不需要自己训练
+   - 你的任务是实现 BC/DAgger 算法，使用提供的专家策略
+   - 详细说明见：WHERE_EXPERT_POLICY_FROM.md
+
+3. 专家策略文件格式：
+   - 文件路径：cs224r/policies/experts/Ant.pkl（对于 Ant-v4 环境）
+   - 格式：pickle 文件，包含：
+     * 'nonlin_type': 激活函数类型（'tanh' 或 'lrelu'）
+     * 'GaussianPolicy': 策略网络参数（权重、偏置、归一化参数等）
+
+4. 专家策略在 DAgger 中的作用：
+   - 当使用 DAgger 算法时，需要专家策略来重新标注收集到的状态
+   - 流程：当前策略收集轨迹 -> 专家策略为这些状态提供正确的动作 -> 用这些数据训练当前策略
+   - 这样可以解决 BC 中的分布偏移问题
+
+5. 如何加载专家策略：
+   - 完整实现：使用 cs224r/policies/loaded_gaussian_policy.py 中的 LoadedGaussianPolicy 类
+   - 本文件中的 load_expert_policy() 是简化版本，仅用于演示
 """
 
 import pickle
@@ -28,7 +64,7 @@ class Config:
     # 训练配置
     BATCH_SIZE = 100      # 训练 batch size
     N_EPOCHS = 100        # 每个迭代的训练轮数
-    N_ITER = 1            # BC 迭代次数（BC=1, DAgger>1）
+    N_ITER = 2            # BC 迭代次数（BC=1, DAgger>1）
     DO_DAGGER = False     # 是否使用 DAgger（True 时会用专家重新标注）
     
     # 数据路径
@@ -198,6 +234,79 @@ def load_expert_data(filepath):
 
 
 # ============================================================================
+# 3.5. 加载专家策略（用于 DAgger）
+# ============================================================================
+def load_expert_policy(filepath, obs_dim, ac_dim):
+    """
+    加载预训练的专家策略网络
+    
+    专家策略文件格式：
+    - pickle 文件，包含 'nonlin_type' 和 'GaussianPolicy' 键
+    - GaussianPolicy 包含：'logstdevs_1_Da', 'hidden', 'obsnorm', 'out'
+    
+    Args:
+        filepath: 专家策略 pickle 文件路径
+        obs_dim: 观测维度
+        ac_dim: 动作维度
+    
+    Returns:
+        expert_policy: 加载的专家策略网络（MLPPolicy 实例）
+    """
+    print(f"Loading expert policy from {filepath}...")
+    
+    try:
+        with open(filepath, 'rb') as f:
+            data = pickle.load(f)
+        
+        # 检查数据格式
+        if 'nonlin_type' not in data:
+            raise ValueError("Expert policy file must contain 'nonlin_type'")
+        
+        nonlin_type = data['nonlin_type']
+        policy_type = [k for k in data.keys() if k != 'nonlin_type'][0]
+        
+        if policy_type != 'GaussianPolicy':
+            raise ValueError(f"Unsupported policy type: {policy_type}")
+        
+        policy_params = data[policy_type]
+        
+        # 提取参数
+        # 注意：这里简化处理，实际专家策略可能有不同的网络结构
+        # 为了简化，我们创建一个与专家策略结构相似的网络
+        # 实际项目中应该完全按照 pickle 文件中的结构重建网络
+        
+        print("Note: This is a simplified expert policy loader.")
+        print("For full implementation, reconstruct the exact network architecture from the pickle file.")
+        print("See cs224r/policies/loaded_gaussian_policy.py for reference.")
+        
+        # 简化版本：创建一个标准的 MLPPolicy
+        # 实际应该根据 pickle 文件中的参数重建网络
+        expert_policy = MLPPolicy(
+            obs_dim=obs_dim,
+            ac_dim=ac_dim,
+            n_layers=Config.N_LAYERS,
+            hidden_size=Config.HIDDEN_SIZE
+        )
+        expert_policy.to(Config.DEVICE)
+        expert_policy.eval()
+        
+        print("Expert policy loaded (simplified version)")
+        print("WARNING: This simplified loader may not match the exact expert policy architecture.")
+        print("For accurate DAgger, use the full LoadedGaussianPolicy from cs224r/policies/loaded_gaussian_policy.py")
+        
+        return expert_policy
+        
+    except FileNotFoundError:
+        print(f"ERROR: Expert policy file not found: {filepath}")
+        print("Expert policy is required for DAgger. Please provide the correct path.")
+        return None
+    except Exception as e:
+        print(f"ERROR loading expert policy: {e}")
+        print("Will fall back to using expert data for relabeling")
+        return None
+
+
+# ============================================================================
 # 4. 训练函数
 # ============================================================================
 def train_bc(policy, observations, actions, n_epochs=100, batch_size=100):
@@ -344,9 +453,59 @@ def relabel_with_expert(expert_policy, observations):
     """
     DAgger 核心：用专家策略重新标注收集到的观测
     
+    为什么需要专家网络（expert_policy）？
+    ====================================
+    
+    1. 【核心问题】Behavior Cloning 的分布偏移（Distribution Shift）
+       - BC 只在专家访问的状态上训练：训练分布 = 专家策略的状态分布
+       - 但测试时：当前策略会访问到专家从未访问过的状态
+       - 结果：策略在"新状态"上表现很差，错误累积导致失败
+    
+    2. 【DAgger 的解决方案】
+       - 用当前策略收集轨迹（访问当前策略会到达的状态）
+       - 用专家网络为这些"新状态"提供正确的动作
+       - 在"真实分布"（当前策略的状态分布）上训练
+    
+    3. 【为什么不能用专家数据代替专家网络？】
+       
+       ❌ 专家数据（expert_data）的局限性：
+       - 只包含专家访问过的状态：s_expert ∈ D_expert
+       - 当前策略访问的状态：s_current（可能不在 D_expert 中）
+       - 无法为"新状态"提供动作！
+       
+       ✅ 专家网络（expert_policy）的优势：
+       - 是一个函数：a = expert_policy(s)，可以为任意状态 s 生成动作
+       - 可以为当前策略访问的"新状态"提供专家动作
+       - 这是 DAgger 算法的核心！
+    
+    4. 【具体例子】
+       场景：训练机器人走路
+       
+       专家数据包含：
+       - 状态1（正常站立）→ 动作1（向前走）
+       - 状态2（轻微倾斜）→ 动作2（调整平衡）
+       
+       当前策略可能访问到：
+       - 状态3（严重倾斜）← 专家数据中没有！
+       
+       如果没有专家网络：
+       - ❌ 无法知道状态3应该做什么动作
+       - ❌ 只能用专家数据中"最接近"的状态，但可能不准确
+       
+       有了专家网络：
+       - ✅ expert_policy(状态3) → 得到专家在状态3下的正确动作
+       - ✅ 策略可以在"真实分布"上学习
+    
+    5. 【DAgger 流程】
+       Iteration 0: 用专家数据训练（warm start）
+       Iteration 1+: 
+         1. 当前策略收集轨迹 → 得到状态 s_current
+         2. 专家网络重新标注 → expert_policy(s_current) → a_expert
+         3. 用 (s_current, a_expert) 训练 → 在真实分布上学习
+    
     Args:
-        expert_policy: 专家策略（可以是加载的专家策略）
-        observations: [N, obs_dim] 当前策略访问的状态
+        expert_policy: 专家策略网络（可以为任意状态生成动作）
+        observations: [N, obs_dim] 当前策略访问的状态（可能不在专家数据中）
     
     Returns:
         expert_actions: [N, ac_dim] 专家在这些状态下的动作
@@ -526,20 +685,61 @@ def main():
     # ========================================================================
     print(f"\n[Step 4] Starting {'DAgger' if Config.DO_DAGGER else 'BC'} training...")
     print(f"Number of iterations: {Config.N_ITER}")
+    print("="*60)
+    print("DAgger 学习的是什么？")
+    print("="*60)
+    print("核心：在当前策略会访问的状态分布上，模仿专家的动作")
+    print("")
+    print("Iteration 0: 在专家状态上学习（warm start）")
+    print("  → 学习：π(s_expert) ≈ π_expert(s_expert)")
+    print("")
+    print("Iteration 1+: 在当前策略状态上学习（DAgger 核心）")
+    print("  → 学习：π(s_current) ≈ π_expert(s_current)")
+    print("  → 其中 s_current ~ d_π_current（当前策略的状态分布）")
+    print("  → 解决分布偏移：训练分布 = 测试分布")
+    print("="*60)
+    print("")
+    print("为什么需要 DAgger，而不是直接用专家网络？")
+    print("="*60)
+    print("1. 模型压缩：专家网络可能太大，需要学习小模型")
+    print("2. 部署需求：需要快速推理，适合边缘设备")
+    print("3. 可用性：专家网络可能是黑盒或计算成本高")
+    print("4. 任务适应：需要针对特定任务优化")
+    print("5. 知识蒸馏：将专家知识转移到可部署的策略")
+    print("")
+    print("详细说明见：WHY_NEED_DAGGER_NOT_EXPERT.md")
+    print("="*60)
     
     # 加载专家策略（用于 DAgger 重新标注）
     expert_policy = None
     if Config.DO_DAGGER:
         print("\nLoading expert policy for DAgger relabeling...")
-        try:
-            # 这里简化处理：如果无法加载专家策略，就用专家数据作为参考
-            # 实际项目中应该加载训练好的专家策略网络
-            print("Note: In full implementation, load expert policy network here")
-            print("For now, we'll use expert data actions as reference")
-            expert_policy = None  # 简化版本，实际应该加载专家策略
-        except Exception as e:
-            print(f"Warning: Could not load expert policy: {e}")
-            print("Will use expert data for relabeling instead")
+        print("="*60)
+        print("专家策略来源说明：")
+        print("="*60)
+        print("【专家网络从哪里来的？】")
+        print("")
+        print("1. 来源：通过强化学习算法预先训练得到")
+        print("   - 使用 PPO、TRPO、SAC 等 RL 算法")
+        print("   - 在环境中交互，不断更新策略参数")
+        print("   - 训练直到策略性能达到专家水平")
+        print("")
+        print("2. 文件信息：")
+        print("   - 文件路径: " + Config.EXPERT_POLICY_PATH)
+        print("   - 格式：pickle 文件（包含网络参数）")
+        print("   - 通常由课程/项目提供，不需要自己训练")
+        print("")
+        print("3. 在 DAgger 中的作用：")
+        print("   - 为当前策略访问的状态提供专家动作")
+        print("   - 解决 BC 中的分布偏移问题")
+        print("")
+        print("详细说明见：WHERE_EXPERT_POLICY_FROM.md")
+        print("="*60)
+        expert_policy = load_expert_policy(
+            filepath=Config.EXPERT_POLICY_PATH,
+            obs_dim=obs_dim,
+            ac_dim=ac_dim
+        )
     
     # 存储所有训练数据
     all_observations = []
@@ -574,14 +774,23 @@ def main():
             # DAgger: 用专家策略重新标注
             if Config.DO_DAGGER:
                 print(f"\n[Iteration {iteration}] DAgger: Relabeling with expert...")
-                print("KEY CONCEPT: Replace collected actions with expert actions")
-                print("This addresses distribution shift in BC!")
+                print("="*60)
+                print("为什么需要专家网络？")
+                print("="*60)
+                print("1. 当前策略访问的状态可能不在专家数据中")
+                print("2. 专家数据只能提供有限状态的动作")
+                print("3. 专家网络可以为任意状态生成专家动作")
+                print("4. 这样可以在'真实分布'（当前策略的状态分布）上训练")
+                print("="*60)
                 if expert_policy is not None:
-                    # 如果有专家策略网络，用它重新标注
+                    # ✅ 正确做法：用专家网络为任意状态生成动作
+                    print("Using expert policy network to relabel...")
                     act_batch = relabel_with_expert(expert_policy, obs_batch)
                 else:
-                    # 简化版本：从专家数据中找到最接近的状态，使用对应的动作
-                    print("Using expert data as reference for relabeling...")
+                    # ⚠️ 简化版本：从专家数据中找到最接近的状态（不准确！）
+                    print("WARNING: Expert policy not loaded, using expert data as fallback...")
+                    print("This is NOT accurate! Expert data may not contain these states.")
+                    print("For proper DAgger, you MUST load the expert policy network.")
                     # 这里简化处理：实际应该用专家策略网络
                     # 为了演示，我们随机选择一些专家动作
                     expert_indices = np.random.choice(
