@@ -8,7 +8,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.distributions import Normal, Independent
-import gym
+
+# 尝试导入 gymnasium，如果失败则使用 gym
+try:
+    import gymnasium as gym  # type: ignore
+except ImportError:
+    try:
+        import gym  # type: ignore
+    except ImportError:
+        raise ImportError("Please install either 'gymnasium' or 'gym' package")
 
 
 # ============================================================================
@@ -73,12 +81,25 @@ def main():
     
     # 1. 创建环境
     print("\n[Step 1] Creating environment...")
-    env_kwargs = {"render_mode": "rgb_array"}
+    env_kwargs = {}
     if ENV_NAME == "Ant-v4":
         env_kwargs["use_contact_forces"] = True
-    env_kwargs["render_mode"] = "human"  # 覆盖为 human 模式
+    env_kwargs["render_mode"] = "human"  # 可视化模式
     
-    env = gym.make(ENV_NAME, **env_kwargs)
+    try:
+        env = gym.make(ENV_NAME, **env_kwargs)
+    except Exception as e:
+        print(f"\n{'='*60}")
+        print("ERROR: Failed to create environment")
+        print(f"{'='*60}")
+        print(f"Error message: {str(e)}")
+        print(f"\nPossible solutions:")
+        print("1. Make sure MuJoCo is installed correctly")
+        print("2. Check if the environment name is correct")
+        print("3. Try installing gymnasium: pip install gymnasium")
+        print("4. For MuJoCo environments, you may need to install mujoco-py")
+        print(f"{'='*60}\n")
+        return
     obs_dim = env.observation_space.shape[0]
     ac_dim = env.action_space.shape[0]
     
@@ -144,8 +165,13 @@ def main():
                 # 裁剪动作到有效范围
                 action = np.clip(action, env.action_space.low, env.action_space.high)
                 
-                # 执行动作
-                next_obs, reward, done, info = env.step(action)
+                # 执行动作（兼容 gym 和 gymnasium）
+                step_result = env.step(action)
+                if len(step_result) == 5:  # gymnasium 返回 5 个值
+                    next_obs, reward, terminated, truncated, info = step_result
+                    done = terminated or truncated
+                else:  # gym 返回 4 个值
+                    next_obs, reward, done, info = step_result
                 
                 # 渲染
                 env.render()

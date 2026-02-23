@@ -662,7 +662,7 @@ def main():
         env=env,
         n_episodes=5,
         max_steps=1000,
-        render=False
+        render=True
     )
     
     # ========================================================================
