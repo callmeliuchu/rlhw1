@@ -109,9 +109,9 @@ class TruncatedNormal:
         """
         action = self.dist.sample()
         # 通过 tanh 将动作限制在 [-1, 1]
-        action = torch.tanh(action)
-        if clip is not None:
-            action = torch.clamp(action, -clip, clip)
+        # action = torch.tanh(action)
+        # if clip is not None:
+        #     action = torch.clamp(action, -clip, clip)
         return action
     
     @property
@@ -164,7 +164,7 @@ class Actor(nn.Module):
 
     def forward(self, obs):
         mu = self.policy(obs)
-        mu = torch.tanh(mu)
+        # mu = torch.tanh(mu)
         std = torch.ones_like(mu) * self.std
 
         dist = TruncatedNormal(mu, std)
@@ -336,8 +336,13 @@ class ACAgent:
         obs, action, _, _, _ = to_torch(batch, self.device)
 
         ### YOUR CODE HERE ###
-
-
+        dist = self.actor(obs)
+        log_prob = dist.log_prob(action)
+        loss = -log_prob.mean()
+        self.actor_opt.zero_grad()
+        loss.backward()
+        self.actor_opt.step()
+        metrics['loss'] = loss.item()
         return metrics
 
 
@@ -648,10 +653,20 @@ def main():
         replay_iter = create_replay_iter(replay_buffer, Config.BATCH_SIZE)
         
         # 这里需要用户实现 bc 方法
-        # for epoch in range(Config.N_EPOCHS):
-        #     metrics = agent.bc(replay_iter)
-        #     if (epoch + 1) % 10 == 0:
-        #         print(f"BC Epoch {epoch+1}/{Config.N_EPOCHS} | Loss: {metrics.get('loss', 'N/A')}")
+        for epoch in range(Config.N_EPOCHS):
+            epoch_loss = 0.0
+            n_batches  = len(replay_buffer) // Config.BATCH_SIZE
+            for _ in range(n_batches):
+                metrics = agent.bc(replay_iter)
+                loss = metrics.get('loss', 0)
+                # 如果是 tensor，调用 .item()，否则直接使用
+                if isinstance(loss, torch.Tensor):
+                    epoch_loss += loss.item()
+                else:
+                    epoch_loss += float(loss)
+            epoch_loss /= n_batches
+            if (epoch + 1) % 10 == 0:
+                print(f"BC Epoch {epoch+1}/{Config.N_EPOCHS} | Loss: {epoch_loss}")
     
     # ========================================================================
     # 步骤 5: 评估策略

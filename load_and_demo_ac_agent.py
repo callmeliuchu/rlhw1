@@ -41,9 +41,9 @@ class TruncatedNormal:
     def sample(self, clip=None):
         """采样动作"""
         action = self.dist.sample()
-        action = torch.tanh(action)
-        if clip is not None:
-            action = torch.clamp(action, -clip, clip)
+        # action = torch.tanh(action)
+        # if clip is not None:
+        #     action = torch.clamp(action, -clip, clip)
         return action
     
     @property
@@ -81,7 +81,7 @@ class Actor(nn.Module):
 
     def forward(self, obs):
         mu = self.policy(obs)
-        mu = torch.tanh(mu)
+        # mu = torch.tanh(mu)
         std = torch.ones_like(mu) * self.std
 
         dist = TruncatedNormal(mu, std)
